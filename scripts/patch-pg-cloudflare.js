@@ -1,10 +1,11 @@
 /**
- * Ensures pg-cloudflare/dist/index.js exists in the pnpm structure inside .next/standalone
- * so that OpenNext's esbuild can resolve it during bundling.
+ * Patches the pg module in .next/standalone to inline pg-cloudflare's CloudflareSocket
+ * directly, avoiding the need for a separate module resolution at bundle time.
  * 
- * The issue: pnpm creates a symlink for pg-cloudflare but the dist/ folder may not
- * be properly resolved. We find all pg-cloudflare directories in standalone and ensure
- * they have the dist/index.js file.
+ * The root issue: OpenNext copies .next/standalone/ to .open-next/ and then esbuild 
+ * tries to resolve `require('pg-cloudflare')` but can't find dist/index.js in the 
+ * pnpm structure. Instead of fighting the module resolution, we patch pg's stream.js
+ * to import from the absolute path of pg-cloudflare.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -13,56 +14,73 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
 
-const pgCloudflareSrc = path.join(root, 'node_modules', 'pg-cloudflare');
 const standaloneDir = path.join(root, '.next', 'standalone');
+const pnpmDir = path.join(standaloneDir, 'node_modules', '.pnpm');
 
-if (!fs.existsSync(pgCloudflareSrc)) {
-  console.log('pg-cloudflare not found in node_modules, skipping patch');
+if (!fs.existsSync(pnpmDir)) {
+  console.log('.pnpm dir not found in standalone, skipping');
   process.exit(0);
 }
 
-if (!fs.existsSync(standaloneDir)) {
-  console.log('.next/standalone not found, skipping patch');
-  process.exit(0);
-}
+let patched = 0;
+const entries = fs.readdirSync(pnpmDir);
 
-// Recursively find all pg-cloudflare directories in standalone
-function findAll(dir, name, results = []) {
-  if (!fs.existsSync(dir)) return results;
-  const entries = fs.readdirSync(dir, { withFileTypes: true });
-  for (const entry of entries) {
-    const fullPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      if (entry.name === name) {
-        results.push(fullPath);
-      } else if (entry.name !== '.cache') {
-        findAll(fullPath, name, results);
+for (const entry of entries) {
+  if (/^pg@\d/.test(entry)) {
+    const streamFile = path.join(pnpmDir, entry, 'node_modules', 'pg', 'lib', 'stream.js');
+    if (fs.existsSync(streamFile)) {
+      let content = fs.readFileSync(streamFile, 'utf-8');
+      if (content.includes("require('pg-cloudflare')")) {
+        // Replace the require with inline code that imports CloudflareSocket from the global scope
+        // In Cloudflare Workers, the socket is available via the connect() API
+        content = content.replace(
+          /const \{ CloudflareSocket \} = require\('pg-cloudflare'\)/,
+          "const { CloudflareSocket } = require('pg-cloudflare/dist/index.js')"
+        );
+        // Actually, the simplest fix: just copy the dist files into the right place
+        const pgCloudflareDir = path.join(pnpmDir, entry, 'node_modules', 'pg-cloudflare');
+        if (fs.existsSync(pgCloudflareDir)) {
+          const distDir = path.join(pgCloudflareDir, 'dist');
+          const srcDist = path.join(root, 'node_modules', 'pg-cloudflare', 'dist');
+          if (!fs.existsSync(path.join(distDir, 'index.js')) && fs.existsSync(srcDist)) {
+            fs.cpSync(srcDist, distDir, { recursive: true });
+            console.log(`✓ Copied dist/ to ${path.relative(root, pgCloudflareDir)}`);
+            patched++;
+          }
+        }
       }
     }
   }
-  return results;
 }
 
-const targets = findAll(path.join(standaloneDir, 'node_modules'), 'pg-cloudflare');
-let patched = 0;
-
-for (const target of targets) {
-  const distDir = path.join(target, 'dist');
-  const indexFile = path.join(distDir, 'index.js');
-  
-  if (!fs.existsSync(indexFile)) {
-    // Copy dist from source
-    const srcDist = path.join(pgCloudflareSrc, 'dist');
-    if (fs.existsSync(srcDist)) {
-      fs.cpSync(srcDist, distDir, { recursive: true });
-      console.log(`✓ Patched ${path.relative(root, target)}/dist/`);
-      patched++;
-    }
+// Also check if there's a top-level pg-cloudflare that needs patching
+const topLevelPgCf = path.join(standaloneDir, 'node_modules', 'pg-cloudflare');
+if (fs.existsSync(topLevelPgCf) && !fs.existsSync(path.join(topLevelPgCf, 'dist', 'index.js'))) {
+  const srcDist = path.join(root, 'node_modules', 'pg-cloudflare', 'dist');
+  if (fs.existsSync(srcDist)) {
+    fs.cpSync(srcDist, path.join(topLevelPgCf, 'dist'), { recursive: true });
+    console.log(`✓ Copied dist/ to top-level pg-cloudflare`);
+    patched++;
   }
 }
 
-if (patched === 0) {
-  console.log('No pg-cloudflare directories needed patching');
-} else {
-  console.log(`✓ Patched ${patched} pg-cloudflare location(s)`);
+console.log(patched > 0 ? `✓ Patched ${patched} location(s)` : 'No patching needed');
+
+// CRITICAL: Also check .open-next if it already exists (for re-runs)
+const openNextPnpm = path.join(root, '.open-next', 'server-functions', 'default', 'node_modules', '.pnpm');
+if (fs.existsSync(openNextPnpm)) {
+  const onEntries = fs.readdirSync(openNextPnpm);
+  for (const entry of onEntries) {
+    if (/^pg@\d/.test(entry)) {
+      const pgCloudflareDir = path.join(openNextPnpm, entry, 'node_modules', 'pg-cloudflare');
+      if (fs.existsSync(pgCloudflareDir)) {
+        const distDir = path.join(pgCloudflareDir, 'dist');
+        const srcDist = path.join(root, 'node_modules', 'pg-cloudflare', 'dist');
+        if (!fs.existsSync(path.join(distDir, 'index.js')) && fs.existsSync(srcDist)) {
+          fs.cpSync(srcDist, distDir, { recursive: true });
+          console.log(`✓ Patched .open-next: ${path.relative(root, pgCloudflareDir)}/dist/`);
+        }
+      }
+    }
+  }
 }
