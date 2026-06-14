@@ -197,7 +197,7 @@ export default withNextIntl({
     selfRecord,
   },
   basePath,
-  output: process.env.CLOUDFLARE ? undefined : 'standalone',
+  output: 'standalone',
   typescript: {
     ignoreBuildErrors: true,
   },
