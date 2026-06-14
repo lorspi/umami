@@ -20,6 +20,8 @@
     "start-env": "node scripts/start-env.js",
     "start-server": "node server.js",
     "build-app": "next build --turbo",
+    "build:cloudflare": "cross-env CLOUDFLARE=1 npm-run-all check-env build-db check-db build-tracker build-recorder build-geo build-app build-opennext",
+    "build-opennext": "npx opennextjs-cloudflare build",
     "build-icons": "svgr ./src/assets --out-dir src/components/svg --typescript",
     "build-components": "node scripts/bump-components.js && tsup",
     "build-tracker": "rollup -c rollup.tracker.config.js",
