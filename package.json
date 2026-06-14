@@ -21,7 +21,7 @@
     "start-server": "node server.js",
     "build-app": "next build --turbo",
     "build:cloudflare": "cross-env CLOUDFLARE=1 npm-run-all build-db build-tracker build-recorder build-app build-opennext",
-    "build-opennext": "npx opennextjs-cloudflare build --skipNextBuild",
+    "build-opennext": "node scripts/patch-pg-cloudflare.js && npx opennextjs-cloudflare build --skipNextBuild",
     "build-icons": "svgr ./src/assets --out-dir src/components/svg --typescript",
     "build-components": "node scripts/bump-components.js && tsup",
     "build-tracker": "rollup -c rollup.tracker.config.js",
