@@ -120,6 +120,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.4.10",
     "@netlify/plugin-nextjs": "^5.15.9",
+    "@opennextjs/cloudflare": "^1.19.11",
     "@rollup/plugin-alias": "^5.0.0",
     "@rollup/plugin-commonjs": "^25.0.4",
     "@rollup/plugin-json": "^6.0.0",
@@ -156,6 +157,7 @@
     "tsup": "^8.5.0",
     "tsx": "^4.19.0",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.6"
+    "vitest": "^4.1.6",
+    "wrangler": "^4.100.0"
   }
 }
